@@ -1,3 +1,5 @@
+*Added fixes from various other peoples pull requests.*
+
 See LaTeX run.  Run latexrun.
 
 latexrun fits LaTeX into a modern build environment.  It hides LaTeX's
