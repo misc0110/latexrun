@@ -82,10 +82,10 @@ def main():
         ' (default: %(default)s)')
     arg_parser.add_argument(
         '-W', metavar='(no-)CLASS',
-        action=ArgParserWarnAction, dest='nowarns', default=set(['underfull']),
+        action=ArgParserWarnAction, dest='nowarns', default=set(['underfull', 'bibtex-missing']),
         help='Enable/disable warning from CLASS, which can be any package name, '
         'LaTeX warning class (e.g., font), bad box type '
-        '(underfull, overfull, loose, tight), or "all"')
+        '(underfull, overfull, loose, tight), BibTeX missing entries (bibtex-missing), or "all"')
     arg_parser.add_argument(
         '-O', metavar='DIR', dest='obj_dir', default='latex.out',
         help='Directory for intermediate files and control database '
@@ -1502,6 +1502,7 @@ class BibTeX(Task):
         self.__cmd = cmd
         self.__cmd_args = cmd_args
         self.__obj_dir = obj_dir
+        self.__nowarns = nowarns
 
     def stable(self):
         # If bibtex doesn't have its inputs, then it's stable because
@@ -1722,7 +1723,7 @@ class BibTeX(Task):
         # Parse and pretty-print the log
         log = open(extra['outbase'] + '.blg', 'rt').read()
         inputs = extra['inputs']
-        for msg in BibTeXFilter(log, inputs).get_messages():
+        for msg in BibTeXFilter(log, inputs, self.__nowarns).get_messages():
             msg.emit()
 
         # BibTeX exits with 1 if there are warnings, 2 if there are
@@ -1733,9 +1734,10 @@ class BibTeX(Task):
         return 0
 
 class BibTeXFilter:
-    def __init__(self, data, inputs):
+    def __init__(self, data, inputs, nowarns):
         self.__inputs = inputs
         self.__key_locs = None
+        self.__suppress = nowarns
 
         self.__messages = []
 
@@ -1826,6 +1828,10 @@ class BibTeXFilter:
                     filename, lineno = self.__find_key(m2.group(1))
                     if filename:
                         break
+            # ignore 'empty *' for bib entries
+            if "bibtex-missing" in self.__suppress:
+                if "empty publisher in" in m.group(0) or "empty address in" in m.group(0) or "page numbers missing in" in m.group(0) or "no number and no volume in" in m.group(0) or "no journal in" in m.group(0) or "empty organization in" in m.group(0) or "empty institution in" in m.group(0):
+                    return None
             return ('warning', filename, lineno, m.group(1))
         # @<Clean up and leave@>
         if match('Aborted at line ([0-9]+) of file (.*)'):
