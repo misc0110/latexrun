@@ -1217,6 +1217,8 @@ class LaTeXFilter:
                 return self.__pdftex_fail()
             if lookingat('Runaway '):
                 return self.__runaway()
+            if lookingatre(r".*PDF inclusion"):
+                return self.__pdf_inclusion()
             if lookingatre(r'(Overfull|Underfull|Loose|Tight) \\[hv]box \('):
                 return self.__bad_box()
             if lookingatre('(Package |Class |LaTeX |pdfTeX )?(\w+ )?warning: ', re.I):
@@ -1416,6 +1418,10 @@ class LaTeXFilter:
         if not self.__lookingat('! ') and self.__avail:
             # Skip token list, which is limited to one line
             self.__skip_line()
+
+    def __pdf_inclusion(self):
+        # Skips warning about PDF inclusion with multiple PDFs
+        self.__skip_line()
 
     def __bad_box(self):
         # Function hpack and vpack.  hpack prints a warning, a
