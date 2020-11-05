@@ -739,24 +739,27 @@ class LaTeX(Task):
         if jobname is None or not os.path.exists(jobname + '.log'):
             return super().stable()
         
-        log = open(jobname + ".log").read().split("\n")
-        for idx, line in enumerate(log):
-            if "run Biber on" in line:
-                biber_name = " ".join([x.strip() for x in log[idx + 1].strip().split(" ")[1:]]).strip()
-                run_biber = True
-        
-        if run_biber:
-            debug("Running biber now")
-            cwd = os.path.dirname(jobname)
-            env = os.environ.copy()
-            shutil.copyfile("%s.bib" % biber_name, os.path.join(cwd, "%s.bib" % biber_name))
-            p = subprocess.Popen(["biber", biber_name], cwd=cwd, env=env,
-                                stdin=subprocess.DEVNULL,
-                                stdout=subprocess.PIPE,
-                                stderr=subprocess.PIPE)
-            stdout, stderr = p.communicate()
-            #print(stdout.decode("utf-8"))
-            return False
+        try:
+            log = open(jobname + ".log").read().split("\n")
+            for idx, line in enumerate(log):
+                if "run Biber on" in line:
+                    biber_name = " ".join([x.strip() for x in log[idx + 1].strip().split(" ")[1:]]).strip()
+                    run_biber = True
+
+            if run_biber:
+                debug("Running biber now")
+                cwd = os.path.dirname(jobname)
+                env = os.environ.copy()
+                shutil.copyfile("%s.bib" % biber_name, os.path.join(cwd, "%s.bib" % biber_name))
+                p = subprocess.Popen(["biber", biber_name], cwd=cwd, env=env,
+                                    stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE)
+                stdout, stderr = p.communicate()
+                #print(stdout.decode("utf-8"))
+                return False
+        except:
+            pass
     
         return super().stable()
 
