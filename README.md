@@ -1,3 +1,6 @@
+*Since latexrun is currently unmaintained, this is a fork incorporating some
+bug fixes I've found useful.*
+
 See LaTeX run.  Run latexrun.
 
 latexrun fits LaTeX into a modern build environment.  It hides LaTeX's
