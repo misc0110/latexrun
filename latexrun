@@ -82,10 +82,10 @@ def main():
         ' (default: %(default)s)')
     arg_parser.add_argument(
         '-W', metavar='(no-)CLASS',
-        action=ArgParserWarnAction, dest='nowarns', default=set(['underfull']),
+        action=ArgParserWarnAction, dest='nowarns', default=set(['underfull', 'bibtex-missing']),
         help='Enable/disable warning from CLASS, which can be any package name, '
         'LaTeX warning class (e.g., font), bad box type '
-        '(underfull, overfull, loose, tight), strict parsing (strict-parse),  or "all"')
+        '(underfull, overfull, loose, tight), BibTeX missing entries (bibtex-missing), or "all"')
     arg_parser.add_argument(
         '-O', metavar='DIR', dest='obj_dir', default='latex.out',
         help='Directory for intermediate files and control database '
@@ -294,7 +294,7 @@ class DB:
             json.dump(self.__val, fp, indent=2, separators=(',', ': '))
             fp.flush()
             os.fsync(fp.fileno())
-        os.rename(tmp_filename, self.__filename)
+        os.replace(tmp_filename, self.__filename)
 
     def get_summary(self, task_id):
         """Return the recorded summary for the given task or None."""
@@ -745,8 +745,38 @@ class LaTeX(Task):
         self.__cmd_args = cmd_args
         self.__obj_dir = obj_dir
         self.__nowarns = nowarns
-
+        self.__stable = True
         self.__pass = 0
+
+    def stable(self):
+        run_biber = False
+        jobname = self.get_jobname()
+        if jobname is None or not os.path.exists(jobname + '.log'):
+            return super().stable()
+        
+        try:
+            log = open(jobname + ".log").read().split("\n")
+            for idx, line in enumerate(log):
+                if "run Biber on" in line:
+                    biber_name = " ".join([x.strip() for x in log[idx + 1].strip().split(" ")[1:]]).strip()
+                    run_biber = True
+
+            if run_biber:
+                debug("Running biber now")
+                cwd = os.path.dirname(jobname)
+                env = os.environ.copy()
+                shutil.copyfile("%s.bib" % biber_name, os.path.join(cwd, "%s.bib" % biber_name))
+                p = subprocess.Popen(["biber", biber_name], cwd=cwd, env=env,
+                                    stdin=subprocess.DEVNULL,
+                                    stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE)
+                stdout, stderr = p.communicate()
+                #print(stdout.decode("utf-8"))
+                return False
+        except:
+            pass
+    
+        return super().stable()
 
     def _input_args(self):
         # If filename starts with a character the tex command-line
@@ -848,6 +878,8 @@ class LaTeX(Task):
                 data = os.read(stdout.fileno(), 4096)
                 if not data:
                     break
+                if os.name == 'nt':
+                    data = data.replace(b'\r', b'')
                 # See "A note about encoding" above
                 data = data.decode('ascii', errors='surrogateescape')
                 buf.append(data)
@@ -927,7 +959,7 @@ class LaTeX(Task):
             if parts[0] == 'PWD':
                 pwd = parts[1]
             elif parts[0] in ('INPUT', 'OUTPUT'):
-                if parts[1].startswith('/'):
+                if os.path.isabs(parts[1]):
                     path = parts[1]
                 else:
                     # Try to make "nice" paths, especially for clean
@@ -975,13 +1007,12 @@ class LaTeX(Task):
                 LaTeXFilter(self.__nowarns).feed(
                     logfile.read(), True).get_messages()):
             msg.emit()
-
         # Return LaTeX's exit status
         return extra['status']
 
     def __clean_messages(self, msgs):
         """Make some standard log messages more user-friendly."""
-        have_undefined_reference = False
+        has_errors = any(msg.typ == 'error' for msg in msgs)
         for msg in msgs:
             if msg.msg == '==> Fatal error occurred, no output PDF file produced!':
                 msg = msg._replace(typ='info',
@@ -989,10 +1020,15 @@ class LaTeX(Task):
             if msg.msg.startswith('[LaTeX] '):
                 # Strip unnecessary package name
                 msg = msg._replace(msg=msg.msg.split(' ', 1)[1])
-            if re.match(r'Reference .* undefined', msg.msg):
-                have_undefined_reference = True
-            if have_undefined_reference and \
-               re.match(r'There were undefined references', msg.msg):
+            if has_errors and re.match(
+                r'.*[Rr]erun to get .* right|.* on page .* undefined', msg.msg
+            ):
+                # Warnings on undefined references may occur in high
+                # numbers when documents fail to build.
+                continue
+            if re.match(
+                r"There were (multiply-defined labels|undefined references)", msg.msg
+            ):
                 # LaTeX prints this at the end so the user knows it's
                 # worthwhile looking back at the log.  Since latexrun
                 # makes the earlier messages obvious, this is
@@ -1058,7 +1094,7 @@ class LaTeXCommit(Task):
             else:
                 debug('commiting {} to {}', outname, commit)
                 shutil.copy(outname, outname + '~')
-                os.rename(outname + '~', commit)
+                os.replace(outname + '~', commit)
         except OSError as e:
             raise TaskError('error committing latex output: {}'.format(e)) from e
         self._input('file', outname)
@@ -1225,6 +1261,8 @@ class LaTeXFilter:
                 return self.__pdftex_fail()
             if lookingat('Runaway '):
                 return self.__runaway()
+            if lookingatre(r".*PDF inclusion"):
+                return self.__pdf_inclusion()
             if lookingatre(r'(Overfull|Underfull|Loose|Tight) \\[hv]box \('):
                 return self.__bad_box()
             if lookingatre('(Package |Class |LaTeX |pdfTeX )?(\w+ )?warning: ', re.I):
@@ -1427,6 +1465,10 @@ class LaTeXFilter:
             # Skip token list, which is limited to one line
             self.__skip_line()
 
+    def __pdf_inclusion(self):
+        # Skips warning about PDF inclusion with multiple PDFs
+        self.__skip_line()
+
     def __bad_box(self):
         # Function hpack and vpack.  hpack prints a warning, a
         # newline, then a short_display of the offending text.
@@ -1513,6 +1555,7 @@ class BibTeX(Task):
         self.__cmd = cmd
         self.__cmd_args = cmd_args
         self.__obj_dir = obj_dir
+        self.__nowarns = nowarns
 
     def stable(self):
         # If bibtex doesn't have its inputs, then it's stable because
@@ -1648,7 +1691,7 @@ class BibTeX(Task):
 
         if self.__is_biber():
             outbase = os.path.join(cwd, outbase)
-        outputs = [outbase+ext for ext in ['.bbl','.blg','.bcf']]
+        outputs = [outbase + ext for ext in ['.bbl','.blg','.bcf']]
         return RunResult(outputs, {'outbase': outbase, 'status': status,
                                    'inputs': inputs})
 
@@ -1702,7 +1745,7 @@ class BibTeX(Task):
                 # If this path is relative to the source directory,
                 # clean it up for error reporting and portability of
                 # the dependency DB
-                if filename.startswith('/'):
+                if os.path.isabs(filename):
                     relname = os.path.relpath(filename)
                     if '../' not in relname:
                         filename = relname
@@ -1733,7 +1776,7 @@ class BibTeX(Task):
         # Parse and pretty-print the log
         log = open(extra['outbase'] + '.blg', 'rt').read()
         inputs = extra['inputs']
-        for msg in BibTeXFilter(log, inputs).get_messages():
+        for msg in BibTeXFilter(log, inputs, self.__nowarns).get_messages():
             msg.emit()
 
         # BibTeX exits with 1 if there are warnings, 2 if there are
@@ -1744,9 +1787,10 @@ class BibTeX(Task):
         return 0
 
 class BibTeXFilter:
-    def __init__(self, data, inputs):
+    def __init__(self, data, inputs, nowarns):
         self.__inputs = inputs
         self.__key_locs = None
+        self.__suppress = nowarns
 
         self.__messages = []
 
@@ -1837,6 +1881,10 @@ class BibTeXFilter:
                     filename, lineno = self.__find_key(m2.group(1))
                     if filename:
                         break
+            # ignore 'empty *' for bib entries
+            if "bibtex-missing" in self.__suppress:
+                if "empty publisher in" in m.group(0) or "empty address in" in m.group(0) or "page numbers missing in" in m.group(0) or "no number and no volume in" in m.group(0) or "no journal in" in m.group(0) or "empty organization in" in m.group(0) or "empty institution in" in m.group(0):
+                    return None
             return ('warning', filename, lineno, m.group(1))
         # @<Clean up and leave@>
         if match('Aborted at line ([0-9]+) of file (.*)'):

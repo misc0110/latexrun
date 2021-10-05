@@ -72,7 +72,7 @@ def test(latexrun_path, latexrun_args, input_path):
     m = re.search(pre + 'bibtex-cmd: (.*)', input_src, re.I|re.M)
     if m:
         bibtex_cmd = m.group(1)
-        latexrun_args += ["--bibtex-cmd",  bibtex_cmd]
+        latexrun_args = latexrun_args + ["--bibtex-cmd",  bibtex_cmd]
 
     m = re.search(pre + 'output:\n((?:' + pre + '.*\n)*)', input_src, re.I|re.M)
     if m:
@@ -99,7 +99,7 @@ def test(latexrun_path, latexrun_args, input_path):
     if input_path.endswith('.tex'):
         cmd = latexrun_cmd + [os.path.basename(input_path)]
     elif input_path.endswith('.sh'):
-        cmd = ['bash', os.path.basename(input_path)] + latexrun_cmd
+        cmd = ['sh', os.path.basename(input_path)] + latexrun_cmd
 
     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                          cwd=input_dir or None)
